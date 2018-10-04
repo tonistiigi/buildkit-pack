@@ -1,3 +1,6 @@
+[![asciicinema example](https://asciinema.org/a/2huuQ3iYTAXTGrrLRD4xd50XS.png)](https://asciinema.org/a/2huuQ3iYTAXTGrrLRD4xd50XS)
+
+
 ## buildkit-pack
 
 BuildKit frontend for building buildpacks directly.
