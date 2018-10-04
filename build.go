@@ -2,6 +2,8 @@ package builder
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -12,11 +14,20 @@ import (
 )
 
 const (
-	keyStack = "stack"
+	keyStack         = "stack"
+	LocalNameContext = "context"
+	buildArgPrefix   = "build-arg:"
 )
 
 func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 	opts := c.BuildOpts().Opts
+
+	// also accept build args from Moby
+	for k, v := range opts {
+		if strings.HasPrefix(k, buildArgPrefix) {
+			opts[strings.TrimPrefix(k, buildArgPrefix)] = v
+		}
+	}
 
 	stack := "cflinuxfs2"
 	if v, ok := opts[keyStack]; ok {
@@ -28,18 +39,47 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		return nil, err
 	}
 
+	m, err := readManifest(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+
+	var env map[string]string
+	var startCommand string
+
+	if m != nil {
+		if len(m.Applications) > 0 {
+			// TODO: allow setting app with target
+			app := m.Applications[0]
+			env = app.EnvironmentVariables
+			startCommand = app.Command
+		} else {
+			env = m.EnvironmentVariables
+			startCommand = m.Command
+		}
+	}
+
 	// TODO: read buildpacks and download directly
 
 	// TODO: git/http sources
-	src := llb.Local("context", llb.SessionID(c.BuildOpts().SessionID), llb.SharedKeyHint("pack-src"))
+	src := llb.Local(LocalNameContext, llb.SessionID(c.BuildOpts().SessionID), llb.SharedKeyHint("pack-src"))
 
 	builderImage := llb.Image(buildName, llb.WithMetaResolver(c))
 
+	for k, v := range env {
+		builderImage = builderImage.AddEnv(k, v)
+	}
+
 	build := runBuilder(c, builderImage, `/packs/builder -buildpacksDir /var/lib/buildpacks  -outputDroplet /out/droplet.tgz -outputMetadata /out/result.json`, llb.Dir("/workspace"))
 	build.AddMount("/workspace", src, llb.Readonly)
-	build.AddMount("/tmp/cache", llb.Scratch(), llb.AsPersistentCacheDir("buildpack-build-cache", llb.CacheMountShared))
+	build.AddMount("/tmp", llb.Scratch(), llb.AsPersistentCacheDir("buildpack-build-cache", llb.CacheMountShared))
 
-	extract := llb.Image("alpine").Run(llb.Shlex(`sh -c "mkdir -p /out/home/vcap && tar -C /out/home/vcap -xzf /in/droplet.tgz && chown -R 2000:2000 /out/home/vcap"`), llb.WithCustomName("copy droplet to stack"), llb.Dir("/in"))
+	setupStartCommand := ""
+	if startCommand != "" {
+		setupStartCommand = fmt.Sprintf("if [ ! -f /out/home/vcap/app/Procfile ] && [ -f /out/home/vcap/staging_info.yml ]; then cat /out/home/vcap/staging_info.yml | jq '.start_command = \\\"%s\\\"' > /out/home/vcap/staging_info.yml.new;  mv /out/home/vcap/staging_info.yml.new /out/home/vcap/staging_info.yml; fi;", startCommand) // staging_info.yml is json !
+	}
+
+	extract := llb.Image("alpine").Run(llb.Shlex("apk add --no-cache jq")).Run(llb.Shlex(`ash -c "set -x;mkdir -p /out/home/vcap && tar -C /out/home/vcap -xzf /in/droplet.tgz;`+setupStartCommand+`chown -R 2000:2000 /out/home/vcap"`), llb.WithCustomName("copy droplet to stack"), llb.Dir("/in"))
 
 	extract.AddMount("/in", build.Root(), llb.SourcePath("out"), llb.Readonly)
 	st := extract.AddMount("/out", llb.Image(runName))
