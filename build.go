@@ -44,7 +44,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 	extract.AddMount("/in", build.Root(), llb.SourcePath("out"), llb.Readonly)
 	st := extract.AddMount("/out", llb.Image(runName))
 
-	def, err := st.Marshal()
+	def, err := st.Marshal(llb.WithCaps(c.BuildOpts().LLBCaps))
 	if err != nil {
 		return nil, err
 	}
@@ -100,8 +100,9 @@ func runBuilder(c client.Client, img llb.State, cmd string, opts ...llb.RunOptio
 
 	if mountCgroups {
 		es.AddMount("/sys/fs/cgroup", llb.Scratch())
-		hosts := llb.Image("alpine").Run(llb.Shlex(`sh -c 'echo "127.0.0.1 $(hostname)" > /out/hosts'`), llb.WithCustomName("[internal] make hostname resolvable"))
-		es.AddMount("/etc/hosts", hosts.Root(), llb.SourcePath("hosts"), llb.Readonly)
+		alpine := llb.Image("alpine").Run(llb.Shlex(`sh -c 'echo "127.0.0.1 $(hostname)" > /out/hosts'`), llb.WithCustomName("[internal] make hostname resolvable"))
+		hosts := alpine.AddMount("/out", llb.Scratch())
+		es.AddMount("/etc/hosts", hosts, llb.SourcePath("hosts"), llb.Readonly)
 	}
 
 	return es
