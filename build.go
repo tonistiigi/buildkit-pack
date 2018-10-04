@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	keyStack         = "stack"
-	LocalNameContext = "context"
-	buildArgPrefix   = "build-arg:"
+	keyStack          = "stack"
+	LocalNameContext  = "context"
+	buildArgPrefix    = "build-arg:"
+	keyBuildpackOrder = "buildpackOrder"
+	keySkipDetect     = "skipDetect"
 )
 
 func Build(ctx context.Context, c client.Client) (*client.Result, error) {
@@ -44,6 +46,11 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		return nil, err
 	}
 
+	buildpackOrder := ""
+	if v, ok := opts[keyBuildpackOrder]; ok {
+		buildpackOrder = v
+	}
+
 	var env map[string]string
 	var startCommand string
 
@@ -53,9 +60,15 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 			app := m.Applications[0]
 			env = app.EnvironmentVariables
 			startCommand = app.Command
+			if app.Buildpack != "" && buildpackOrder == "" {
+				buildpackOrder = app.Buildpack
+			}
 		} else {
 			env = m.EnvironmentVariables
 			startCommand = m.Command
+			if m.Buildpack != "" && buildpackOrder == "" {
+				buildpackOrder = m.Buildpack
+			}
 		}
 	}
 
@@ -70,7 +83,15 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		builderImage = builderImage.AddEnv(k, v)
 	}
 
-	build := runBuilder(c, builderImage, `/packs/builder -buildpacksDir /var/lib/buildpacks  -outputDroplet /out/droplet.tgz -outputMetadata /out/result.json`, llb.Dir("/workspace"))
+	skipDetect := "false"
+	if v, ok := opts[keySkipDetect]; ok {
+		skipDetect = v
+	}
+	if buildpackOrder != "" {
+		buildpackOrder = "-buildpackOrder=" + buildpackOrder
+	}
+
+	build := runBuilder(c, builderImage, fmt.Sprintf(`/packs/builder -buildpacksDir /var/lib/buildpacks  -outputDroplet /out/droplet.tgz -outputMetadata /out/result.json -skipDetect=%s %s`, skipDetect, buildpackOrder), llb.Dir("/workspace"))
 	build.AddMount("/workspace", src, llb.Readonly)
 	build.AddMount("/tmp", llb.Scratch(), llb.AsPersistentCacheDir("buildpack-build-cache", llb.CacheMountShared))
 

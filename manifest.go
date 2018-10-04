@@ -13,14 +13,15 @@ import (
 
 type Manifest struct {
 	Applications         []Application     `yaml:"applications"`
+	Buildpack            string            `yaml:"buildpack,omitempty"`
 	Command              string            `yaml:"command,omitempty"`
 	EnvironmentVariables map[string]string `yaml:"env,omitempty"`
 }
 
 type Application struct {
-	Name                 string            `yaml:"name,omitempty"`
-	Buildpack            string            `yaml:"buildpack,omitempty"`
-	Buildpacks           []string          `yaml:"buildpacks,omitempty"`
+	Name      string `yaml:"name,omitempty"`
+	Buildpack string `yaml:"buildpack,omitempty"`
+	// Buildpacks           []string          `yaml:"buildpacks,omitempty"`
 	Command              string            `yaml:"command,omitempty"`
 	EnvironmentVariables map[string]string `yaml:"env,omitempty"`
 }
