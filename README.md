@@ -18,7 +18,7 @@ docker build -f manifest.yml .
 
 #### With `buildctl`:
 ```
-buildctl build --frontend=gateway.v0 --frontend-opt source=tonistiigi/pack --local context=.
+buildctl build --frontend=gateway.v0 --opt source=tonistiigi/pack --local context=.
 ```
 
 ### Options
