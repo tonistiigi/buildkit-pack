@@ -124,13 +124,19 @@ func newSolveOpt(clicontext *cli.Context, w io.WriteCloser) (*client.SolveOpt, e
 	// }
 
 	return &client.SolveOpt{
-		Exporter: "docker",
-		ExporterAttrs: map[string]string{
-			"name": clicontext.String("tag"),
+		Exports: []client.ExportEntry{
+			{
+				Type: client.ExporterDocker,
+				Attrs: map[string]string{
+					"name": clicontext.String("tag"),
+				},
+				Output: func(_ map[string]string) (io.WriteCloser, error) {
+					return w, nil
+				},
+			},
 		},
-		ExporterOutput: w,
-		LocalDirs:      localDirs,
-		FrontendAttrs:  frontendAttrs,
+		LocalDirs:     localDirs,
+		FrontendAttrs: frontendAttrs,
 	}, nil
 }
 

@@ -26,14 +26,7 @@ type Application struct {
 	EnvironmentVariables map[string]string `yaml:"env,omitempty"`
 }
 
-func readManifest(ctx context.Context, c client.Client) (*Manifest, error) {
-	st := llb.Local(LocalNameContext,
-		llb.SessionID(c.BuildOpts().SessionID),
-		llb.IncludePatterns([]string{"manifest.yml"}),
-		llb.SharedKeyHint("manifest.yml"),
-		llb.WithCustomName("load manifest.yml"),
-	)
-
+func readManifest(ctx context.Context, c client.Client, st llb.State) (*Manifest, error) {
 	def, err := st.Marshal(llb.WithCaps(c.BuildOpts().LLBCaps))
 	if err != nil {
 		return nil, err
