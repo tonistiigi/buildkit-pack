@@ -8,6 +8,7 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/frontend/gateway/client"
+	gwpb "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -16,6 +17,7 @@ import (
 const (
 	keyStack          = "stack"
 	LocalNameContext  = "context"
+	InputNameManifest = "manifest"
 	buildArgPrefix    = "build-arg:"
 	keyBuildpackOrder = "buildpackOrder"
 	keySkipDetect     = "skipDetect"
@@ -23,12 +25,46 @@ const (
 
 func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 	opts := c.BuildOpts().Opts
+	gwcaps := c.BuildOpts().Caps
 
 	// also accept build args from Moby
 	for k, v := range opts {
 		if strings.HasPrefix(k, buildArgPrefix) {
 			opts[strings.TrimPrefix(k, buildArgPrefix)] = v
 		}
+	}
+
+	var (
+		manifest llb.State
+		src      llb.State
+	)
+
+	// Use frontend input instead of `llb.Local` if supported by the gateway capabilities.
+	if (&gwcaps).Supports(gwpb.CapFrontendInputs) == nil {
+		inputs, err := c.Inputs(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		inputManifest, ok := inputs[InputNameManifest]
+		if ok {
+			manifest = inputManifest
+		}
+
+		inputContext, ok := inputs[LocalNameContext]
+		if ok {
+			src = inputContext
+		}
+
+	} else {
+		manifest = llb.Local(LocalNameContext,
+			llb.SessionID(c.BuildOpts().SessionID),
+			llb.IncludePatterns([]string{"manifest.yml"}),
+			llb.SharedKeyHint("manifest.yml"),
+			llb.WithCustomName("load manifest.yml"),
+		)
+
+		src = llb.Local(LocalNameContext, llb.SessionID(c.BuildOpts().SessionID), llb.SharedKeyHint("pack-src"))
 	}
 
 	stack := "cflinuxfs2"
@@ -41,7 +77,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		return nil, err
 	}
 
-	m, err := readManifest(ctx, c)
+	m, err := readManifest(ctx, c, manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -73,9 +109,6 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 	}
 
 	// TODO: read buildpacks and download directly
-
-	// TODO: git/http sources
-	src := llb.Local(LocalNameContext, llb.SessionID(c.BuildOpts().SessionID), llb.SharedKeyHint("pack-src"))
 
 	builderImage := llb.Image(buildName, llb.WithMetaResolver(c))
 
@@ -126,7 +159,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 
 	var config []byte
 	eg.Go(func() error {
-		_, c, err := c.ResolveImageConfig(ctx, runName, client.ResolveImageConfigOpt{})
+		_, c, err := c.ResolveImageConfig(ctx, runName, llb.ResolveImageConfigOpt{})
 		if err != nil {
 			return err
 		}
